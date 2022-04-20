@@ -13,17 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+import { getVoidLogger } from '@backstage/backend-common';
+import { setupRequestMockHandlers } from '@backstage/backend-test-utils';
+import { ConfigReader } from '@backstage/config';
+import { readGitLabIntegrationConfig } from '@backstage/integration';
 import { rest } from 'msw';
 import { setupServer, SetupServerApi } from 'msw/node';
-
-import { ConfigReader } from '@backstage/config';
-import { setupRequestMockHandlers } from '@backstage/backend-test-utils';
-import { readGitLabIntegrationConfig } from '@backstage/integration';
-import { getVoidLogger } from '@backstage/backend-common';
-
 import { GitLabClient } from './client';
-import { getGroupMembers, getInstanceUsers, readUsers } from './users';
 import { UserTransformer } from './types';
+import { getGroupMembers, getInstanceUsers, readUsers } from './users';
 
 const server = setupServer();
 setupRequestMockHandlers(server);

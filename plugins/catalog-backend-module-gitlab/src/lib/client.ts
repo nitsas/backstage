@@ -14,13 +14,21 @@
  * limitations under the License.
  */
 
-import fetch, { RequestInit, Response } from 'node-fetch';
-import { merge } from 'lodash';
+import { InputError } from '@backstage/errors';
 import {
   getGitLabRequestOptions,
-  GitLabIntegrationConfig,
+  GitLabIntegration,
+  ScmIntegrationRegistry,
 } from '@backstage/integration';
+import { merge } from 'lodash';
+import fetch, { RequestInit, Response } from 'node-fetch';
 import { Logger } from 'winston';
+import {
+  GitLabProjectResponse,
+  GitLabGroupResponse,
+  GitLabUserResponse,
+} from './types';
+import { parseGroupUrl } from './url';
 
 export type ListOptions = {
   [key: string]: string | number | boolean | undefined;
@@ -35,35 +43,92 @@ export type PagedResponse<T> = {
 };
 
 export class GitLabClient {
-  readonly baseUrl: string;
-  private readonly config: GitLabIntegrationConfig;
-  private readonly logger: Logger;
+  constructor(
+    private readonly options: {
+      integrations: ScmIntegrationRegistry;
+      logger: Logger;
+    },
+  ) {}
 
-  constructor(options: { config: GitLabIntegrationConfig; logger: Logger }) {
-    this.config = options.config;
-    this.logger = options.logger;
-    this.baseUrl = options.config.baseUrl;
-  }
+  listProjects(
+    targetUrl: string,
+    options?: {
+      last_activity_after?: string;
+    },
+  ): AsyncGenerator<GitLabProjectResponse> {
+    const integration = this.getIntegration(targetUrl);
+    const groupFullPath = parseGroupUrl(targetUrl, integration.config.baseUrl);
 
-  /**
-   * Indicates whether the client is for a SaaS or self managed GitLab instance.
-   */
-  isSelfManaged(): boolean {
-    return this.config.host !== 'gitlab.com';
-  }
+    if (groupFullPath) {
+      const endpoint = `${
+        integration.config.apiBaseUrl
+      }/groups/${encodeURIComponent(groupFullPath)}/projects`;
 
-  async listProjects(options?: ListOptions): Promise<PagedResponse<any>> {
-    if (options?.group) {
-      return this.pagedRequest(
-        `/groups/${encodeURIComponent(options?.group)}/projects`,
+      return paginated<GitLabProjectResponse>(
+        o => this.pagedRequest(endpoint, o),
         {
-          ...options,
+          per_page: 100,
           include_subgroups: true,
+          ...(options?.last_activity_after && {
+            last_activity_after: options.last_activity_after,
+          }),
         },
       );
     }
 
-    return this.pagedRequest(`/projects`, options);
+    return paginated<GitLabProjectResponse>(
+      o => this.pagedRequest('/projects', o),
+      {
+        per_page: 100,
+        ...(options?.last_activity_after && {
+          last_activity_after: options.last_activity_after,
+        }),
+      },
+    );
+  }
+
+  listGroups(targetUrl: string): AsyncGenerator<GitLabGroupResponse> {
+    const integration = this.getIntegration(targetUrl);
+
+    return paginated<GitLabGroupResponse>(
+      options =>
+        this.pagedRequest(`${integration.config.apiBaseUrl}/groups`, options),
+      { per_page: 100 },
+    );
+  }
+
+  listUsers(
+    targetUrl: string,
+    options?: { inherited?: boolean; blocked?: boolean },
+  ): AsyncGenerator<GitLabUserResponse> {
+    const integration = this.getIntegration(targetUrl);
+
+    // If it is a group URL, list only the members of that group
+    const groupFullPath = parseGroupUrl(targetUrl, integration.config.baseUrl);
+    if (groupFullPath) {
+      const inherited = options?.inherited ?? true;
+      const endpoint = `/groups/${encodeURIComponent(groupFullPath)}/members${
+        inherited ? '/all' : ''
+      }`;
+
+      // TODO(minnsoe): perform a second /users/:id request to enrich and match instance users
+      return paginated<GitLabUserResponse>(
+        opts => this.pagedRequest(endpoint, opts),
+        { per_page: 100, ...(options?.blocked && { blocked: true }) },
+      );
+    }
+
+    // Otherwise, list the users of the entire instance
+    if (integration.config.host !== 'gitlab.com') {
+      throw new Error(
+        'Getting all GitLab instance users is only supported for self-managed hosts.',
+      );
+    }
+
+    return paginated<GitLabUserResponse>(
+      opts => this.pagedRequest('/users', opts),
+      { active: true, per_page: 100 },
+    );
   }
 
   /**
@@ -99,7 +164,7 @@ export class GitLabClient {
    *
    * This method can be used to perform authenticated calls to any GitLab
    * endpoint against the configured GitLab instance. The underlying response is
-   * returned from fetch without modiication. Request options can be overriden
+   * returned from fetch without modification. Request options can be overridden
    * as they are merged to produce the final values; passed in values take
    * precedence.
    *
@@ -126,6 +191,16 @@ export class GitLabClient {
     }
 
     return response;
+  }
+
+  private getIntegration(url: string): GitLabIntegration {
+    const integration = this.options.integrations.gitlab.byUrl(url);
+    if (!integration) {
+      throw new InputError(
+        `No GitLab integration found for URL ${url}, Please add a configuration entry for it under integrations.gitlab.`,
+      );
+    }
+    return integration;
   }
 }
 
@@ -158,7 +233,7 @@ function listOptionsToQueryString(options?: ListOptions): string {
  * setting the page key in the options passed into the request function and
  * making repeated calls until there are no more pages.
  *
- * @see {@link pagedRequest}
+ * @see {@link GitLabClient.pagedRequest}
  * @param request - Function which returns a PagedResponse to walk through.
  * @param options - Initial ListOptions for the request function.
  */

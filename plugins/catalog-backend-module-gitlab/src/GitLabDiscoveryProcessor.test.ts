@@ -20,7 +20,7 @@ import { LocationSpec } from '@backstage/plugin-catalog-backend';
 import { rest } from 'msw';
 import { setupServer } from 'msw/node';
 import { GitLabDiscoveryProcessor, parseUrl } from './GitLabDiscoveryProcessor';
-import { GitLabProject } from './lib';
+import { GitLabProjectResponse } from './lib';
 
 const server = setupServer();
 
@@ -44,7 +44,7 @@ const GROUP_LOCATION: LocationSpec = {
 function setupFakeServer(
   url: string,
   callback: (request: { page: number; include_subgroups: boolean }) => {
-    data: GitLabProject[];
+    data: GitLabProjectResponse[];
     nextPage?: number;
   },
 ) {

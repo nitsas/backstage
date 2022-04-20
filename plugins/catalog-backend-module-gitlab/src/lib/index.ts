@@ -15,17 +15,14 @@
  */
 
 export { GitLabClient, paginated } from './client';
-export {
-  readGitLabOrgProviderConfig,
-  groupByIntegrationConfig,
-} from './config';
-export { getInstanceUsers, getGroupMembers, readUsers } from './users';
-
-export type { GitLabOrgProviderConfig } from './config';
-export { parseGitLabGroupUrl, getGroups } from './groups';
+export { readGroups } from './groups';
 export type {
-  GitLabProject,
+  GitLabGroupResponse,
+  GitLabProjectResponse,
+  GitLabSharedGroupResponse,
   GitLabUserResponse,
+  GroupTransformer,
   UserTransformer,
 } from './types';
-export type { UserIngestionOptions } from './users';
+export { getGroupMembers, readUsers } from './users';
+export type { ReadUsersOptions } from './users';

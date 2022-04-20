@@ -13,21 +13,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { ConfigReader } from '@backstage/config';
-import { setupRequestMockHandlers } from '@backstage/backend-test-utils';
-import { readGitLabIntegrationConfig } from '@backstage/integration';
+
 import { getVoidLogger } from '@backstage/backend-common';
+import { setupRequestMockHandlers } from '@backstage/backend-test-utils';
 import { stringifyEntityRef } from '@backstage/catalog-model';
+import { ConfigReader } from '@backstage/config';
+import { readGitLabIntegrationConfig } from '@backstage/integration';
 import { rest } from 'msw';
 import { setupServer, SetupServerApi } from 'msw/node';
 import { GitLabClient } from './client';
 import {
-  parseGitLabGroupUrl,
-  getGroupPathComponents,
-  getGroups,
-  populateChildrenMembers,
   GroupAdjacency,
   GroupNode,
+  populateChildrenMembers,
+  readGroups,
 } from './groups';
 
 const server = setupServer();
@@ -170,14 +169,14 @@ beforeEach(() => {
   setupFakeInstanceGroups(server);
 });
 
-describe('getGroups', () => {
+describe('readGroups', () => {
   it('should map the group response to group entity, parent and children adjacency', async () => {
     const client = new GitLabClient({
       config: MOCK_CONFIG,
       logger: getVoidLogger(),
     });
 
-    const groupAdjacency = await getGroups(client, '', '.');
+    const groupAdjacency = await readGroups(client, '', '.');
     expect(groupAdjacency.size).toEqual(3);
     expect(groupAdjacency.get(1)?.entity?.spec?.children).toHaveLength(1);
     expect(groupAdjacency.get(1)?.entity?.spec?.children).toContain(
@@ -194,7 +193,7 @@ describe('getGroups', () => {
       logger: getVoidLogger(),
     });
 
-    const groupAdjacency = await getGroups(client, '', '.');
+    const groupAdjacency = await readGroups(client, '', '.');
     const groupEntity = groupAdjacency.get(1)?.entity;
 
     expect(groupEntity).toHaveProperty('metadata.name', 'alpha');
@@ -211,13 +210,13 @@ describe('getGroups', () => {
       logger: getVoidLogger(),
     });
 
-    const groupAdjacencyPeriod = await getGroups(client, '', '.');
+    const groupAdjacencyPeriod = await readGroups(client, '', '.');
     expect(groupAdjacencyPeriod.get(2)?.entity).toHaveProperty(
       'metadata.name',
       'alpha.one',
     );
 
-    const groupAdjacencyUnderscore = await getGroups(client, '', '_');
+    const groupAdjacencyUnderscore = await readGroups(client, '', '_');
     expect(groupAdjacencyUnderscore.get(2)?.entity).toHaveProperty(
       'metadata.name',
       'alpha_one',
@@ -302,185 +301,5 @@ describe('populateChildren', () => {
         name: 'inherited.user.two',
       }),
     );
-  });
-});
-
-describe('parseGitLabGroupUrl', () => {
-  it('returns null if the url is valid but no group path', () => {
-    // simple usecase
-    expect(parseGitLabGroupUrl('https://example.com/')).toBeNull();
-    expect(parseGitLabGroupUrl('https://example.com')).toBeNull();
-
-    // with base URL
-    expect(
-      parseGitLabGroupUrl(
-        'https://example.com/dir/',
-        'https://example.com/dir',
-      ),
-    ).toBeNull();
-    expect(
-      parseGitLabGroupUrl('https://example.com/dir', 'https://example.com/dir'),
-    ).toBeNull();
-  });
-
-  it('returns gitlab group path with multiple levels of subgroups', () => {
-    expect(parseGitLabGroupUrl('https://example.com/a')).toEqual('a');
-    expect(parseGitLabGroupUrl('https://example.com/a/')).toEqual('a');
-    expect(parseGitLabGroupUrl('https://example.com/a/b')).toEqual('a/b');
-    expect(parseGitLabGroupUrl('https://example.com/a/b/c')).toEqual('a/b/c');
-
-    // with base URL
-    expect(
-      parseGitLabGroupUrl(
-        'https://example.com/dir/a',
-        'https://example.com/dir',
-      ),
-    ).toEqual('a');
-    expect(
-      parseGitLabGroupUrl(
-        'https://example.com/dir/a/',
-        'https://example.com/dir',
-      ),
-    ).toEqual('a');
-    expect(
-      parseGitLabGroupUrl(
-        'https://example.com/dir/a/b',
-        'https://example.com/dir',
-      ),
-    ).toEqual('a/b');
-    expect(
-      parseGitLabGroupUrl(
-        'https://example.com/dir/a/b/c',
-        'https://example.com/dir',
-      ),
-    ).toEqual('a/b/c');
-  });
-
-  it('handles reserved GitLab path components', () => {
-    // first path component with groups redirects to path without groups
-    expect(parseGitLabGroupUrl('https://example.com/groups/parent')).toEqual(
-      'parent',
-    );
-    expect(parseGitLabGroupUrl('https://example.com/groups/a/b/c')).toEqual(
-      'a/b/c',
-    );
-
-    expect(
-      parseGitLabGroupUrl(
-        'https://example.com/dir/groups/parent',
-        'https://example.com/dir',
-      ),
-    ).toEqual('parent');
-    expect(
-      parseGitLabGroupUrl(
-        'https://example.com/dir/groups/a/b/c',
-        'https://example.com/dir',
-      ),
-    ).toEqual('a/b/c');
-
-    // hyphen path component after group path is used to delimit subpages
-    expect(
-      parseGitLabGroupUrl('https://example.com/groups/parent/-/group_members'),
-    ).toEqual('parent');
-    expect(
-      parseGitLabGroupUrl('https://example.com/groups/a/b/c/-/group_members'),
-    ).toEqual('a/b/c');
-  });
-
-  it('throws error if group url invalid', () => {
-    expect(() => parseGitLabGroupUrl('https://example.com/groups')).toThrow();
-    expect(() => parseGitLabGroupUrl('invalid/url')).toThrow();
-  });
-
-  it('throws error if base url is not a substring of the group url', () => {
-    expect(() =>
-      parseGitLabGroupUrl(
-        'https://example.com/groups',
-        'https://wrong.example.com/dir',
-      ),
-    ).toThrow();
-  });
-});
-
-describe('getGroupPathComponents', () => {
-  it('should provide array of group path components', () => {
-    // simple usecase
-    expect(getGroupPathComponents('https://example.com/')).toEqual([]);
-
-    expect(getGroupPathComponents('https://example.com/a')).toEqual(['a']);
-    expect(getGroupPathComponents('https://example.com/a/')).toEqual(['a']);
-    expect(getGroupPathComponents('https://example.com/a/b')).toEqual([
-      'a',
-      'b',
-    ]);
-    expect(getGroupPathComponents('https://example.com/a/b/')).toEqual([
-      'a',
-      'b',
-    ]);
-  });
-
-  it('should strip out base URL path components', () => {
-    expect(
-      getGroupPathComponents(
-        'https://example.com/dir',
-        'https://example.com/dir',
-      ),
-    ).toEqual([]);
-    expect(
-      getGroupPathComponents(
-        'https://example.com/dir/a',
-        'https://example.com/dir',
-      ),
-    ).toEqual(['a']);
-    expect(
-      getGroupPathComponents(
-        'https://example.com/dir/a',
-        'https://example.com/dir/',
-      ),
-    ).toEqual(['a']);
-
-    expect(
-      getGroupPathComponents(
-        'https://example.com/dir/a/',
-        'https://example.com/dir',
-      ),
-    ).toEqual(['a']);
-    expect(
-      getGroupPathComponents(
-        'https://example.com/dir/a/b',
-        'https://example.com/dir',
-      ),
-    ).toEqual(['a', 'b']);
-    expect(
-      getGroupPathComponents(
-        'https://example.com/dir/a/b/',
-        'https://example.com/dir',
-      ),
-    ).toEqual(['a', 'b']);
-  });
-
-  it('should handle base URL with no path components', () => {
-    expect(
-      getGroupPathComponents('https://example.com/a', 'https://example.com/'),
-    ).toEqual(['a']);
-    expect(
-      getGroupPathComponents('https://example.com/a/', 'https://example.com/'),
-    ).toEqual(['a']);
-
-    expect(
-      getGroupPathComponents('https://example.com/a/b', 'https://example.com'),
-    ).toEqual(['a', 'b']);
-    expect(
-      getGroupPathComponents('https://example.com/a/b/', 'https://example.com'),
-    ).toEqual(['a', 'b']);
-  });
-
-  it('throws error if base url is not a substring of the group url', () => {
-    expect(() =>
-      getGroupPathComponents(
-        'https://example.com/groups',
-        'https://wrong.example.com/dir',
-      ),
-    ).toThrow();
   });
 });

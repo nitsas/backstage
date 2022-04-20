@@ -31,7 +31,7 @@ import {
   processingResult,
 } from '@backstage/plugin-catalog-backend';
 import { Logger } from 'winston';
-import { GitLabClient, GitLabProject, paginated } from './lib';
+import { GitLabClient, GitLabProjectResponse, paginated } from './lib';
 
 /**
  * Extracts repositories out of an GitLab instance.
@@ -153,7 +153,7 @@ export class GitLabDiscoveryProcessor implements CatalogProcessor {
 
 type Result = {
   scanned: number;
-  matches: GitLabProject[];
+  matches: GitLabProjectResponse[];
 };
 
 /*
